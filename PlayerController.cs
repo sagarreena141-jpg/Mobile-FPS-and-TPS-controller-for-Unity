@@ -1,234 +1,74 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class PlayerController : MonoBehaviour
 {
-    public static PlayerController instance;
+    [Header("Movement")]
+    public float moveSpeed = 5f;
+    public float jumpForce = 7f;
 
-    public enum PlayerControlMode { FirstPerson, ThirdPerson}
-    public PlayerControlMode mode;
+    [Header("Mobile Joystick")]
+    public Joystick joystick;
 
-    // References
-    [Space(20)]
-    [SerializeField] private CharacterController characterController;
-    [Header("First person camera")]
-    [SerializeField] private Transform fpCameraTransform;
-    [Header("Third person camera")]
-    [SerializeField] private Transform cameraPole;
-    [SerializeField] private Transform tpCameraTransform;
-    [SerializeField] private Transform graphics;
-    [Space(20)]
+    private Rigidbody rb;
+    private bool grounded;
 
-    // Player settings
-    [Header("Settings")]
-    [SerializeField] private float cameraSensitivity;
-    [SerializeField] private float moveSpeed;
-    [SerializeField] private float moveInputDeadZone;
-
-    [Header("Third person camera settings")]
-    [SerializeField] private LayerMask cameraObstacleLayers;
-    private float maxCameraDistance;
-    private bool isMoving;
-
-    // Touch detection
-    private int leftFingerId, rightFingerId;
-    private float halfScreenWidth;
-
-    // Camera control
-    private Vector2 lookInput;
-    private float cameraPitch;
-
-    // Player movement
-    private Vector2 moveTouchStartPosition;
-    private Vector2 moveInput;
-
-    private void Awake(){
-        if(instance == null) instance = this;
-        else if(instance != this) Destroy(gameObject);
-    }
-
-    private void Start()
+    void Start()
     {
-        // id = -1 means the finger is not being tracked
-        leftFingerId = -1;
-        rightFingerId = -1;
-
-        // only calculate once
-        halfScreenWidth = Screen.width / 2;
-
-        // calculate the movement input dead zone
-        moveInputDeadZone = Mathf.Pow(Screen.height / moveInputDeadZone, 2);
-
-        if (mode == PlayerControlMode.ThirdPerson) {
-
-            // Get the initial angle for the camera pole
-            cameraPitch = cameraPole.localRotation.eulerAngles.x;
-
-            // Set max camera distance to the distance the camera is from the player in the editor
-            maxCameraDistance = tpCameraTransform.localPosition.z;
-        }
+        rb = GetComponent<Rigidbody>();
     }
 
-    private void Update()
+    void Update()
     {
-        // Handles input
-        GetTouchInput();
+        // PC Controls
+        float keyboardX = Input.GetAxis("Horizontal");
+        float keyboardZ = Input.GetAxis("Vertical");
 
+        // Mobile Controls
+        float mobileX = 0f;
+        float mobileZ = 0f;
 
-        if (rightFingerId != -1) {
-            // Ony look around if the right finger is being tracked
-            //Debug.Log("Rotating");
-            LookAround();
+        if (joystick != null)
+        {
+            mobileX = joystick.Horizontal;
+            mobileZ = joystick.Vertical;
         }
 
-        if (leftFingerId != -1)
+        // Use whichever input is being used
+        float x = Mathf.Abs(mobileX) > 0.1f ? mobileX : keyboardX;
+        float z = Mathf.Abs(mobileZ) > 0.1f ? mobileZ : keyboardZ;
+
+        Vector3 direction = new Vector3(x, 0, z);
+
+        // Move
+        if (direction.magnitude > 0.1f)
         {
-            // Ony move if the left finger is being tracked
-            //Debug.Log("Moving");
-            Move();
+            transform.Translate(
+                direction.normalized * moveSpeed * Time.deltaTime,
+                Space.World
+            );
+        }
+
+        // PC Jump
+        if (Input.GetKeyDown(KeyCode.Space) && grounded)
+        {
+            Jump();
         }
     }
 
-    private void FixedUpdate()
+    public void Jump()
     {
-        if (mode == PlayerControlMode.ThirdPerson) MoveCamera();
-    }
-
-    private void GetTouchInput() {
-        // Iterate through all the detected touches
-        for (int i = 0; i < Input.touchCount; i++)
+        if (grounded)
         {
-
-            Touch t = Input.GetTouch(i);
-
-            // Check each touch's phase
-            switch (t.phase)
-            {
-                case TouchPhase.Began:
-
-                    if (t.position.x < halfScreenWidth && leftFingerId == -1)
-                    {
-                        // Start tracking the left finger if it was not previously being tracked
-                        leftFingerId = t.fingerId;
-
-                        // Set the start position for the movement control finger
-                        moveTouchStartPosition = t.position;
-                    }
-                    else if (t.position.x > halfScreenWidth && rightFingerId == -1)
-                    {
-                        // Start tracking the rightfinger if it was not previously being tracked
-                        rightFingerId = t.fingerId;
-                    }
-
-                    break;
-                case TouchPhase.Ended:
-                case TouchPhase.Canceled:
-
-                    if (t.fingerId == leftFingerId)
-                    {
-                        // Stop tracking the left finger
-                        leftFingerId = -1;
-                        //Debug.Log("Stopped tracking left finger");
-                        isMoving = false;
-                    }
-                    else if (t.fingerId == rightFingerId)
-                    {
-                        // Stop tracking the right finger
-                        rightFingerId = -1;
-                        //Debug.Log("Stopped tracking right finger");
-                    }
-
-                    break;
-                case TouchPhase.Moved:
-
-                    // Get input for looking around
-                    if (t.fingerId == rightFingerId)
-                    {
-                        lookInput = t.deltaPosition * cameraSensitivity * Time.deltaTime;
-                    }
-                    else if (t.fingerId == leftFingerId) {
-
-                        // calculating the position delta from the start position
-                        moveInput = t.position - moveTouchStartPosition;
-                    }
-
-                    break;
-                case TouchPhase.Stationary:
-                    // Set the look input to zero if the finger is still
-                    if (t.fingerId == rightFingerId)
-                    {
-                        lookInput = Vector2.zero;
-                    }
-                    break;
-            }
+            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+            grounded = false;
         }
     }
 
-    private void LookAround()
+    private void OnCollisionEnter(Collision collision)
     {
-
-        switch (mode)
+        if (collision.gameObject.CompareTag("Ground"))
         {
-            case PlayerControlMode.FirstPerson:
-                // vertical (pitch) rotation is applied to the first person camera
-                cameraPitch = Mathf.Clamp(cameraPitch - lookInput.y, -90f, 90f);
-                fpCameraTransform.localRotation = Quaternion.Euler(cameraPitch, 0, 0);
-                break;
-            case PlayerControlMode.ThirdPerson:
-                // vertical (pitch) rotation is applied to the third person camera pole
-                cameraPitch = Mathf.Clamp(cameraPitch - lookInput.y, -90f, 90f);
-                cameraPole.localRotation = Quaternion.Euler(cameraPitch, 0, 0);
-                break;
-        }
-
-        if (mode == PlayerControlMode.ThirdPerson && !isMoving)
-        {
-            // Rotate the graphics in the opposite direction when stationary
-            graphics.Rotate(graphics.up, -lookInput.x);
-        }
-        // horizontal (yaw) rotation
-        transform.Rotate(transform.up, lookInput.x);
-    }
-
-    private void MoveCamera() {
-
-        Vector3 rayDir = tpCameraTransform.position - cameraPole.position;
-
-        Debug.DrawRay(cameraPole.position, rayDir, Color.red);
-        // Check if the camera would be colliding with any obstacle
-        if (Physics.Raycast(cameraPole.position, rayDir, out RaycastHit hit, Mathf.Abs(maxCameraDistance), cameraObstacleLayers)){
-            // Move the camera to the impact point
-            tpCameraTransform.position = hit.point;
-        } else {
-            // Move the camera to the max distance on the local z axis
-            tpCameraTransform.localPosition = new Vector3(0, 0, maxCameraDistance);
+            grounded = true;
         }
     }
-
-    private void Move() {
-
-        // Don't move if the touch delta is shorter than the designated dead zone
-        if (moveInput.sqrMagnitude <= moveInputDeadZone)
-        {
-            isMoving = false;
-            return;
-        }
-
-        if (!isMoving) {
-            graphics.localRotation = Quaternion.Euler(0, 0, 0);
-            isMoving = true;
-        }
-        // Multiply the normalized direction by the speed
-        Vector2 movementDirection = moveInput.normalized * moveSpeed * Time.deltaTime;
-        // Move relatively to the local transform's direction
-        characterController.Move(transform.right * movementDirection.x + transform.forward * movementDirection.y);
-    }
-    
-    public void ResetInput(){
-        // id = -1 means the finger is not being tracked
-        leftFingerId = -1;
-        rightFingerId = -1;
-    }
-
 }
