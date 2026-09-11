@@ -1,234 +1,231 @@
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-
-public class PlayerController : MonoBehaviour
-{
-    public static PlayerController instance;
-
-    public enum PlayerControlMode { FirstPerson, ThirdPerson}
-    public PlayerControlMode mode;
-
-    // References
-    [Space(20)]
-    [SerializeField] private CharacterController characterController;
-    [Header("First person camera")]
-    [SerializeField] private Transform fpCameraTransform;
-    [Header("Third person camera")]
-    [SerializeField] private Transform cameraPole;
-    [SerializeField] private Transform tpCameraTransform;
-    [SerializeField] private Transform graphics;
-    [Space(20)]
-
-    // Player settings
-    [Header("Settings")]
-    [SerializeField] private float cameraSensitivity;
-    [SerializeField] private float moveSpeed;
-    [SerializeField] private float moveInputDeadZone;
-
-    [Header("Third person camera settings")]
-    [SerializeField] private LayerMask cameraObstacleLayers;
-    private float maxCameraDistance;
-    private bool isMoving;
-
-    // Touch detection
-    private int leftFingerId, rightFingerId;
-    private float halfScreenWidth;
-
-    // Camera control
-    private Vector2 lookInput;
-    private float cameraPitch;
-
-    // Player movement
-    private Vector2 moveTouchStartPosition;
-    private Vector2 moveInput;
-
-    private void Awake(){
-        if(instance == null) instance = this;
-        else if(instance != this) Destroy(gameObject);
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Neon Car Runner</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        overflow: hidden;
+        background: #101020;
+        font-family: Arial;
     }
 
-    private void Start()
-    {
-        // id = -1 means the finger is not being tracked
-        leftFingerId = -1;
-        rightFingerId = -1;
-
-        // only calculate once
-        halfScreenWidth = Screen.width / 2;
-
-        // calculate the movement input dead zone
-        moveInputDeadZone = Mathf.Pow(Screen.height / moveInputDeadZone, 2);
-
-        if (mode == PlayerControlMode.ThirdPerson) {
-
-            // Get the initial angle for the camera pole
-            cameraPitch = cameraPole.localRotation.eulerAngles.x;
-
-            // Set max camera distance to the distance the camera is from the player in the editor
-            maxCameraDistance = tpCameraTransform.localPosition.z;
-        }
+    canvas {
+        display: block;
+        margin: auto;
+        background: linear-gradient(#15152e, #202040);
     }
 
-    private void Update()
-    {
-        // Handles input
-        GetTouchInput();
-
-
-        if (rightFingerId != -1) {
-            // Ony look around if the right finger is being tracked
-            //Debug.Log("Rotating");
-            LookAround();
-        }
-
-        if (leftFingerId != -1)
-        {
-            // Ony move if the left finger is being tracked
-            //Debug.Log("Moving");
-            Move();
-        }
+    #info {
+        position: fixed;
+        top: 15px;
+        left: 15px;
+        color: white;
+        font-size: 22px;
+        font-weight: bold;
+        text-shadow: 0 0 10px cyan;
     }
+</style>
+</head>
 
-    private void FixedUpdate()
-    {
-        if (mode == PlayerControlMode.ThirdPerson) MoveCamera();
+<body>
+
+<div id="info">Score: 0</div>
+<canvas id="game" width="500" height="700"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let car = {
+    x: 225,
+    y: 590,
+    width: 50,
+    height: 90,
+    speed: 7
+};
+
+let enemies = [];
+let score = 0;
+let gameOver = false;
+let roadSpeed = 6;
+
+const keys = {};
+
+document.addEventListener("keydown", e => {
+    keys[e.key] = true;
+
+    if (gameOver && e.key === "Enter") {
+        location.reload();
     }
+});
 
-    private void GetTouchInput() {
-        // Iterate through all the detected touches
-        for (int i = 0; i < Input.touchCount; i++)
-        {
+document.addEventListener("keyup", e => {
+    keys[e.key] = false;
+});
 
-            Touch t = Input.GetTouch(i);
+function drawRoad() {
+    // Grass
+    ctx.fillStyle = "#16823b";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Check each touch's phase
-            switch (t.phase)
-            {
-                case TouchPhase.Began:
+    // Road
+    ctx.fillStyle = "#303038";
+    ctx.fillRect(80, 0, 340, canvas.height);
 
-                    if (t.position.x < halfScreenWidth && leftFingerId == -1)
-                    {
-                        // Start tracking the left finger if it was not previously being tracked
-                        leftFingerId = t.fingerId;
+    // Road edges
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(75, 0, 5, canvas.height);
+    ctx.fillRect(420, 0, 5, canvas.height);
 
-                        // Set the start position for the movement control finger
-                        moveTouchStartPosition = t.position;
-                    }
-                    else if (t.position.x > halfScreenWidth && rightFingerId == -1)
-                    {
-                        // Start tracking the rightfinger if it was not previously being tracked
-                        rightFingerId = t.fingerId;
-                    }
+    // Lane lines
+    ctx.fillStyle = "#ffe600";
 
-                    break;
-                case TouchPhase.Ended:
-                case TouchPhase.Canceled:
-
-                    if (t.fingerId == leftFingerId)
-                    {
-                        // Stop tracking the left finger
-                        leftFingerId = -1;
-                        //Debug.Log("Stopped tracking left finger");
-                        isMoving = false;
-                    }
-                    else if (t.fingerId == rightFingerId)
-                    {
-                        // Stop tracking the right finger
-                        rightFingerId = -1;
-                        //Debug.Log("Stopped tracking right finger");
-                    }
-
-                    break;
-                case TouchPhase.Moved:
-
-                    // Get input for looking around
-                    if (t.fingerId == rightFingerId)
-                    {
-                        lookInput = t.deltaPosition * cameraSensitivity * Time.deltaTime;
-                    }
-                    else if (t.fingerId == leftFingerId) {
-
-                        // calculating the position delta from the start position
-                        moveInput = t.position - moveTouchStartPosition;
-                    }
-
-                    break;
-                case TouchPhase.Stationary:
-                    // Set the look input to zero if the finger is still
-                    if (t.fingerId == rightFingerId)
-                    {
-                        lookInput = Vector2.zero;
-                    }
-                    break;
-            }
-        }
+    for (let y = -40; y < canvas.height; y += 100) {
+        let yy = (y + score * roadSpeed) % 100;
+        ctx.fillRect(165, yy, 8, 55);
+        ctx.fillRect(327, yy, 8, 55);
     }
-
-    private void LookAround()
-    {
-
-        switch (mode)
-        {
-            case PlayerControlMode.FirstPerson:
-                // vertical (pitch) rotation is applied to the first person camera
-                cameraPitch = Mathf.Clamp(cameraPitch - lookInput.y, -90f, 90f);
-                fpCameraTransform.localRotation = Quaternion.Euler(cameraPitch, 0, 0);
-                break;
-            case PlayerControlMode.ThirdPerson:
-                // vertical (pitch) rotation is applied to the third person camera pole
-                cameraPitch = Mathf.Clamp(cameraPitch - lookInput.y, -90f, 90f);
-                cameraPole.localRotation = Quaternion.Euler(cameraPitch, 0, 0);
-                break;
-        }
-
-        if (mode == PlayerControlMode.ThirdPerson && !isMoving)
-        {
-            // Rotate the graphics in the opposite direction when stationary
-            graphics.Rotate(graphics.up, -lookInput.x);
-        }
-        // horizontal (yaw) rotation
-        transform.Rotate(transform.up, lookInput.x);
-    }
-
-    private void MoveCamera() {
-
-        Vector3 rayDir = tpCameraTransform.position - cameraPole.position;
-
-        Debug.DrawRay(cameraPole.position, rayDir, Color.red);
-        // Check if the camera would be colliding with any obstacle
-        if (Physics.Raycast(cameraPole.position, rayDir, out RaycastHit hit, Mathf.Abs(maxCameraDistance), cameraObstacleLayers)){
-            // Move the camera to the impact point
-            tpCameraTransform.position = hit.point;
-        } else {
-            // Move the camera to the max distance on the local z axis
-            tpCameraTransform.localPosition = new Vector3(0, 0, maxCameraDistance);
-        }
-    }
-
-    private void Move() {
-
-        // Don't move if the touch delta is shorter than the designated dead zone
-        if (moveInput.sqrMagnitude <= moveInputDeadZone)
-        {
-            isMoving = false;
-            return;
-        }
-
-        if (!isMoving) {
-            graphics.localRotation = Quaternion.Euler(0, 0, 0);
-            isMoving = true;
-        }
-        // Multiply the normalized direction by the speed
-        Vector2 movementDirection = moveInput.normalized * moveSpeed * Time.deltaTime;
-        // Move relatively to the local transform's direction
-        characterController.Move(transform.right * movementDirection.x + transform.forward * movementDirection.y);
-    }
-    
-    public void ResetInput(){
-        // id = -1 means the finger is not being tracked
-        leftFingerId = -1;
-        rightFingerId = -1;
-    }
-
 }
+
+function drawCar() {
+    // Shadow
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    ctx.beginPath();
+    ctx.ellipse(car.x + 25, car.y + 85, 30, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    let gradient = ctx.createLinearGradient(
+        car.x, car.y, car.x + 50, car.y + 90
+    );
+
+    gradient.addColorStop(0, "#00eaff");
+    gradient.addColorStop(0.5, "#0066ff");
+    gradient.addColorStop(1, "#8a00ff");
+
+    ctx.fillStyle = gradient;
+    ctx.roundRect(car.x, car.y, 50, 90, 12);
+    ctx.fill();
+
+    // Windows
+    ctx.fillStyle = "#111827";
+    ctx.roundRect(car.x + 8, car.y + 12, 34, 28, 8);
+    ctx.fill();
+
+    // Lights
+    ctx.fillStyle = "#fff700";
+    ctx.fillRect(car.x + 6, car.y + 5, 12, 7);
+    ctx.fillRect(car.x + 32, car.y + 5, 12, 7);
+
+    // Wheels
+    ctx.fillStyle = "#080808";
+    ctx.fillRect(car.x - 6, car.y + 18, 7, 25);
+    ctx.fillRect(car.x + 49, car.y + 18, 7, 25);
+    ctx.fillRect(car.x - 6, car.y + 58, 7, 25);
+    ctx.fillRect(car.x + 49, car.y + 58, 7, 25);
+}
+
+function drawEnemy(enemy) {
+    ctx.fillStyle = enemy.color;
+    ctx.roundRect(enemy.x, enemy.y, 50, 90, 12);
+    ctx.fill();
+
+    ctx.fillStyle = "#111";
+    ctx.roundRect(enemy.x + 8, enemy.y + 12, 34, 28, 8);
+    ctx.fill();
+
+    ctx.fillStyle = "#ff2222";
+    ctx.fillRect(enemy.x + 7, enemy.y + 75, 12, 7);
+    ctx.fillRect(enemy.x + 31, enemy.y + 75, 12, 7);
+}
+
+function spawnEnemy() {
+    const lanes = [105, 225, 345];
+
+    enemies.push({
+        x: lanes[Math.floor(Math.random() * lanes.length)],
+        y: -100,
+        color: ["#ff1744", "#ff9100", "#00e676", "#e040fb"][
+            Math.floor(Math.random() * 4)
+        ]
+    });
+}
+
+function collision(a, b) {
+    return (
+        a.x < b.x + 50 &&
+        a.x + a.width > b.x &&
+        a.y < b.y + 90 &&
+        a.y + a.height > b.y
+    );
+}
+
+function update() {
+    if (gameOver) return;
+
+    if (keys["ArrowLeft"] && car.x > 85)
+        car.x -= car.speed;
+
+    if (keys["ArrowRight"] && car.x < 365)
+        car.x += car.speed;
+
+    enemies.forEach(enemy => {
+        enemy.y += roadSpeed;
+
+        if (collision(car, enemy)) {
+            gameOver = true;
+        }
+    });
+
+    enemies = enemies.filter(enemy => {
+        if (enemy.y > canvas.height) {
+            score++;
+            return false;
+        }
+        return true;
+    });
+
+    if (Math.random() < 0.025)
+        spawnEnemy();
+
+    roadSpeed = 6 + score * 0.03;
+
+    document.getElementById("info").innerText =
+        "Score: " + score;
+}
+
+function draw() {
+    drawRoad();
+
+    enemies.forEach(drawEnemy);
+    drawCar();
+
+    if (gameOver) {
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.font = "bold 50px Arial";
+        ctx.fillText("GAME OVER", 250, 320);
+
+        ctx.font = "25px Arial";
+        ctx.fillText("Press ENTER to restart", 250, 370);
+        ctx.fillText("Score: " + score, 250, 420);
+    }
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+
+</body>
+</html>
